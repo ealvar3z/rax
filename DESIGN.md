@@ -183,6 +183,11 @@ column
 length
 ```
 
+`offset` is a zero-based index into the original validated UTF-8 byte stream,
+and `length` is measured in UTF-8 bytes. `line` and `column` are one-based
+diagnostic coordinates; columns count Unicode scalar values. An LF or a CRLF
+sequence advances the line once and resets the column to one.
+
 Line and column are for diagnostics. Byte offsets and lengths are the
 unambiguous source coordinates.
 
@@ -1309,16 +1314,15 @@ After the existing design and whitepaper patches, the first implementation
 series is:
 
 ```text
-patches/007-project-charter.patch
-patches/008-repository-skeleton.patch
-patches/009-grammar-and-spans.patch
-patches/010-surface-ast.patch
-patches/011-pure-evaluator.patch
-patches/012-plan-spec-and-resolution.patch
-patches/013-plan-ir.patch
-patches/014-canonical-encoding.patch
-patches/015-sha256-and-plan-id.patch
-patches/016-cli-and-native-equivalence.patch
+patches/007-source-coordinate-contract.patch
+patches/008-grammar-and-spans.patch
+patches/009-surface-ast.patch
+patches/010-pure-evaluator.patch
+patches/011-plan-spec-and-resolution.patch
+patches/012-plan-ir.patch
+patches/013-canonical-encoding.patch
+patches/014-sha256-and-plan-id.patch
+patches/015-cli-and-native-equivalence.patch
 ```
 
 Each patch must:

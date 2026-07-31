@@ -1,0 +1,164 @@
+use Test;
+
+use Rax::Actions;
+use Rax::Parse;
+
+sub parse-text(Str $source, Str :$file = 'sample.rax') {
+    parse-bytes($source.encode('utf8'), :$file)
+}
+
+sub contains-match($value --> Bool) {
+    return True if $value ~~ Match;
+
+    if $value ~~ Associative {
+        for $value.values -> $child {
+            return True if contains-match($child);
+        }
+    }
+    elsif $value ~~ Positional {
+        for $value.list -> $child {
+            return True if contains-match($child);
+        }
+    }
+
+    False
+}
+
+sub nodes-have-complete-spans($value --> Bool) {
+    if $value ~~ Associative {
+        if $value<kind>:exists {
+            return False unless $value<span>:exists;
+            my $span = $value<span>;
+            return False unless $span ~~ Associative;
+            for <file offset line column length> -> $field {
+                return False unless $span{$field}:exists;
+            }
+        }
+
+        for $value.values -> $child {
+            return False unless nodes-have-complete-spans($child);
+        }
+    }
+    elsif $value ~~ Positional {
+        for $value.list -> $child {
+            return False unless nodes-have-complete-spans($child);
+        }
+    }
+
+    True
+}
+
+my $nested-source = q:to/SOURCE/;
+# A complete literal-only module.
+export default = {
+    nil       => Nil,
+    truth     => True,
+    falsehood => False,
+    integer   => -42,
+    rational  => 3/4,
+    string    => "hello",
+    list      => [Nil, True, 7, 1/2, "x",],
+    nested    => { child => "ok", },
+}; # trailing comment
+SOURCE
+
+my $nested = parse-text($nested-source, file => 'nested.rax');
+ok $nested<ok>, 'nested literal module parses';
+isa-ok $nested, Map, 'parse result is a Map';
+isa-ok $nested<module>, Map, 'module is a Map';
+is $nested<diagnostics>.elems, 0, 'successful parse has no diagnostics';
+is $nested<module><kind>, ParseKind::Module, 'module uses the parse tag enum';
+is $nested<module><span><file>, 'nested.rax', 'module span preserves the file label';
+is $nested<module><span><line>, 1, 'module span covers leading comments';
+is $nested<module><span><column>, 1, 'module span begins at the source start';
+
+my $export = $nested<module><declarations>[0];
+is $export<kind>, ParseKind::Export, 'export is tagged';
+is $export<name>, 'default', 'only default export is accepted in this slice';
+is $export<expression><kind>, ParseKind::Map, 'outer expression is a map';
+
+my @entries = $export<expression><entries>;
+is @entries.elems, 8, 'map retains every pair in source order';
+is @entries[0]<value><literal-kind>, LiteralKind::Nil, 'Nil is retained as syntax data';
+is @entries[1]<value><literal-kind>, LiteralKind::Bool, 'True is a Boolean literal';
+is @entries[2]<value><literal-kind>, LiteralKind::Bool, 'False is a Boolean literal';
+is @entries[3]<value><literal-kind>, LiteralKind::Int, 'integer literal is tagged';
+is @entries[3]<value><raw>, '-42', 'integer spelling is retained';
+is @entries[4]<value><literal-kind>, LiteralKind::Rat, 'rational literal is tagged';
+is @entries[4]<value><raw>, '3/4', 'rational spelling is retained';
+is @entries[5]<value><literal-kind>, LiteralKind::Str, 'string literal is tagged';
+is @entries[5]<value><raw>, '"hello"', 'string spelling is retained';
+is @entries[6]<value><kind>, ParseKind::List, 'list is tagged';
+is @entries[6]<value><items>.elems, 5, 'list retains each item';
+is @entries[7]<value><kind>, ParseKind::Map, 'nested map is tagged';
+is @entries[7]<value><entries>[0]<kind>, ParseKind::Pair, 'nested map retains pairs';
+ok !contains-match($nested), 'no Match escapes the parser result';
+ok nodes-have-complete-spans($nested<module>), 'every emitted node has a complete span';
+
+my $unicode-source = "export default = [\n    \"é\",\n    1\n];\n";
+my $unicode = parse-text($unicode-source, file => 'unicode.rax');
+ok $unicode<ok>, 'Unicode source parses';
+my $unicode-list = $unicode<module><declarations>[0]<expression>;
+is $unicode-list<span><offset>, 17, 'list starts at its UTF-8 byte offset';
+is $unicode-list<span><line>, 1, 'list span line is one-based';
+is $unicode-list<span><column>, 18, 'list span column is one-based';
+my $unicode-string = $unicode-list<items>[0];
+is $unicode-string<span><offset>, 23, 'multibyte string start is a byte offset';
+is $unicode-string<span><line>, 2, 'multibyte string is on the second line';
+is $unicode-string<span><column>, 5, 'multibyte string column counts source scalars';
+is $unicode-string<span><length>, 4, 'multibyte string length counts UTF-8 bytes';
+my $unicode-int = $unicode-list<items>[1];
+is $unicode-int<span><offset>, 33, 'subsequent span remains byte-accurate';
+is $unicode-int<span><line>, 3, 'subsequent span line is correct';
+is $unicode-int<span><column>, 5, 'subsequent span column is correct';
+
+my $crlf-source = "export default =\r\n\"é\";\r\n";
+my $crlf = parse-text($crlf-source, file => 'crlf.rax');
+ok $crlf<ok>, 'CRLF source parses';
+my $crlf-string = $crlf<module><declarations>[0]<expression>;
+is $crlf-string<span><offset>, 18, 'CRLF keeps byte offsets';
+is $crlf-string<span><line>, 2, 'CRLF advances the line once';
+is $crlf-string<span><column>, 1, 'CRLF resets the column to one';
+
+my $empty-list = parse-text('export default = [];');
+ok $empty-list<ok>, 'empty list parses';
+is $empty-list<module><declarations>[0]<expression><items>.elems, 0, 'empty list has no items';
+
+my $empty-map = parse-text('export default = {};');
+ok $empty-map<ok>, 'empty map parses';
+is $empty-map<module><declarations>[0]<expression><entries>.elems, 0, 'empty map has no entries';
+
+my $trailing-source = 'export default = Nil; trailing';
+my $trailing = parse-text($trailing-source, file => 'trailing.rax');
+ok !$trailing<ok>, 'trailing syntax is rejected';
+is $trailing<module>, Nil, 'failed parse has no module';
+is $trailing<diagnostics>[0]<code>, 'RAX0002', 'trailing syntax has a stable code';
+is $trailing<diagnostics>[0]<primary><offset>, $trailing-source.index('trailing'), 'trailing diagnostic points at first unconsumed byte';
+
+my $duplicate-source = 'export default = { name => "first", name => "second", };';
+my $duplicate = parse-text($duplicate-source, file => 'duplicate.rax');
+ok !$duplicate<ok>, 'duplicate map key is rejected';
+is $duplicate<module>, Nil, 'duplicate-key failure has no module';
+is $duplicate<diagnostics>[0]<code>, 'RAX0003', 'duplicate key has a stable code';
+my $first-name = $duplicate-source.index('name');
+my $second-name = $duplicate-source.index('name', $first-name + 1);
+is $duplicate<diagnostics>[0]<primary><offset>, $second-name, 'duplicate primary span is the second key';
+is $duplicate<diagnostics>[0]<secondary>[0]<offset>, $first-name, 'duplicate secondary span is the first key';
+
+my @invalid = (
+    'truncated'       => Buf.new(0xE2, 0x82),
+    'stray-continuation' => Buf.new(0x80),
+    'overlong'        => Buf.new(0xC0, 0xAF),
+    'surrogate'       => Buf.new(0xED, 0xA0, 0x80),
+    'out-of-range'    => Buf.new(0xF4, 0x90, 0x80, 0x80),
+);
+
+for @invalid -> $case {
+    my $name = $case.key;
+    my $result = parse-bytes($case.value, file => "$name.rax");
+    ok !$result<ok>, "$name UTF-8 is rejected";
+    is $result<diagnostics>[0]<code>, 'RAX0001', "$name uses the invalid UTF-8 code";
+    is $result<diagnostics>[0]<primary><offset>, 0, "$name reports the invalid leading byte";
+}
+
+done-testing;
