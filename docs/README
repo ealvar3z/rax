@@ -1,0 +1,23 @@
+Rax whitepaper source
+=====================
+
+Requirements
+------------
+
+GNU groff with pic, eqn, tbl, and the ms macro package; ps2pdf for PDF output.
+
+Build
+-----
+
+    make
+
+or directly:
+
+    groff -pet -ms -Tps rax-whitepaper.ms > finished.ps
+    ps2pdf finished.ps finished.pdf
+
+The -p, -e, and -t options run pic, eqn, and tbl respectively.
+
+Check formatting without retaining output:
+
+    make check

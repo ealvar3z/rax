@@ -1,0 +1,259 @@
+--- rax-whitepaper.ms
++++ rax-whitepaper.ms
+@@ -752,32 +752,163 @@
+ collection, fixed-output fetchers, caches, and remote builders. Each milestone
+ must finish a thin end-to-end slice before widening the surface.
+ .SH
+-Security and Trust
++Security as Evidence
+ .PP
+-Rax reduces ambient authority but cannot make a software supply chain safe by
+-naming objects with hashes alone. Several trust boundaries remain.
+-.PP
+-\fBCompiler trust.\fP The Rax implementation, Raku++ compiler, C++ compiler,
+-runtime libraries, and bootstrap chain can affect the executable. Reproducible
+-builds and diverse rebuilding can provide evidence, but bootstrapping remains a
+-separate program of work.
+-.PP
+-\fBSource trust.\fP A digest proves identity, not benevolence. Source
+-authentication, review, update policy, and downgrade resistance remain
+-necessary [11].
+-.PP
+-\fBBuilder trust.\fP A malicious builder may exploit kernel or sandbox defects,
+-consume excessive resources, or produce hostile outputs. Capability restriction
+-limits authority but does not replace isolation, quotas, and output inspection.
+-.PP
+-\fBCache trust.\fP Content hashes detect corruption or substitution of object
+-bytes. Signed realization records express authorization and provenance. Neither
+-proves that the source was safe or that the plan was desirable.
+-.PP
+-\fBState.\fP Mutable databases, user files, private keys, and service state do
+-not belong in the immutable software store. Rax may deploy programs and
+-configuration templates, but migration and backup of mutable state require
+-separate protocols.
++A hash is a seal, not a conscience. It can show that bytes did not change. It
++cannot show that the bytes are kind, correct, recent, or wisely chosen. Rax
++therefore does not claim to solve software supply-chain security. No package
++manager can. Its narrower promise is useful enough: given an authenticated Plan
++and an explicit trust policy, Rax should make it independently verifiable that
++an installed object is an authorized realization of that exact Plan and its
++complete closure.
++.PP
++Trust does not disappear. It comes out of hiding.
++.PP
++\fBThreat model.\fP The adversary may submit unauthorized source, compromise a
++source repository or signing key, alter build parameters, operate a builder,
++cache, mirror, or transparency service, replay an old release, present different
++releases to different users, or poison a tool in the bootstrap chain. A builder
++may attempt undeclared file, process, clock, environment, or network access. A
++cache may bind the right name to the wrong bytes. Several actors may collude.
++.PP
++The initial model assumes that the selected cryptographic hash and signature
++algorithms hold, and that the local verifier, its policy state, and the machine
++executing that verifier have not already been subverted. Kernel, hardware, and
++cryptographic failure belong to a deeper model. Rax must state these assumptions
++instead of burying them beneath the word secure. The threat classes follow the
++source, build, distribution, selection, and usage boundaries described by
++Supply-chain Levels for Software Artifacts (SLSA) [13].
++.PP
++\fBSecurity goals.\fP Rax should bind an ObjectId to the exact PlanId that
++requested it; reject undeclared inputs and effects when the platform can enforce
++that claim; verify downloaded objects locally; preserve conflicting
++realizations; authenticate source and release history; resist rollback, freeze,
++and mix-and-match attacks; gather evidence from independent builders; and let
++the user decide which evidence is enough.
++.PP
++\fBNon-goals.\fP Rax cannot prove that source is benevolent, that a
++maintainer is honest, that reviewers understood the code, that a program is
++free of defects, or that several witnesses did not collude. It cannot make an
++unsafe configuration safe, recover a compromised machine, or prevent a network
++adversary from denying
++service. A reproducible backdoor remains a backdoor. SLSA makes similar limits
++explicit: provenance does not establish code quality, producer honesty, or the
++security of every transitive dependency [13].
++.PP
++\fBThe realization evidence model.\fP The store holds facts. Signatures hold
++claims. Policy makes a decision. These three must not be confused.
++.KS
++.DS L
++Fact:      hash(object bytes) = ObjectId
++Claim:     builder B says PlanId produced ObjectId
++Decision:  policy P accepts a set of facts and claims
++.DE
++.KE
++.PP
++A realization record should contain the PlanId, ObjectId, declared inputs,
++observed references, granted capabilities, builder identity, platform, and the
++normalization rules applied to the output. The client verifies every fact it can
++verify locally. A signature proves who made a claim; it does not make the claim
++true.
++.PP
++Rax should export attestations compatible with SLSA provenance rather than
++invent a private vocabulary for common build facts [13]. Work outside the
++realizer, such as review, testing, release approval, and publication, can be
++expressed as signed steps in the style of in-toto [14]. The Rax Plan is stronger
++than a report written after the build: it is also the capability envelope that
++constrains the build while it runs.
++.PP
++\fBSource and update authentication.\fP Integrity begins before compilation. A
++perfect build of an unauthorized revision is still unauthorized. Rax package
++collections should carry authenticated source history, following the useful
++precedent established by Guix [11]. Release metadata must also say which keys or
++roles may authorize which objects, when that authority expires, and what version
++the client has already seen.
++.PP
++The Update Framework (TUF) supplies mature machinery for threshold keys,
++delegation, expiration, and resistance to rollback, freeze, fast-forward, and
++mix-and-match attacks [15]. Rax should adopt those semantics or a demonstrably
++equivalent protocol. A content hash says, "this is the old object." It does not
++say, "the old object is still the object you should run."
++.PP
++\fBIndependent and diverse rebuilding.\fP Reproducible builds ask whether the
++same declared inputs produce the same bytes [12]. Agreement is valuable, but
++agreement is not independence. Two witnesses taught by the same compromised
++teacher are one witness wearing two coats.
++.PP
++Rax should distinguish repeated, independent, diverse, and bootstrapped builds.
++A second build on the same service is repeated. A build on another operator's
++machine is independent only in an administrative sense. A diverse build has a
++materially different toolchain or bootstrap ancestry. Diverse double-compiling
++(DDC) gives a researched method for testing whether a compiler binary
++corresponds to its claimed source under stated assumptions [18].
++.PP
++The compiler is not the only ancestor that matters. A 2026 preprint demonstrates
++a trusting-trust attack against the NixOS bootstrap using a malicious
++\fBstrip\fP utility. The poisoned tool propagated through later generations,
++left the final dependency closure, and still altered most resulting executables
++[19]. The lesson is plain: any tool allowed to rewrite an artifact may carry the
++knife.
++.PP
++\fBBootstrap ancestry.\fP Every builder attestation should identify the roots
++from which its result grew: the Raku++ ObjectId, the C++ compiler, assembler,
++linker, binary-rewriting tools, runtime libraries, bootstrap seeds, operating
++system, sandbox implementation, and relevant hardware or virtual-machine class.
++This is a graph, not a badge.
++.PP
++Rax policy may then ask whether two agreeing builders actually descend from
++different roots. It may prefer minimized and auditable binary seeds, as
++Guix's bootstrap work does, but it must never call two builds diverse merely
++because their hostnames
++differ [11,18,19].
++.PP
++\fBTransparency and equivocation resistance.\fP A signature can lie consistently
++to one victim. Transparency forces the lie into public view. Signed source
++revisions, realizations, reproduction results, and release authorizations should
++be eligible for inclusion in an append-only log. Clients verify inclusion;
++monitors verify that the log remains append-only; independent observers compare
++log views.
++.PP
++Sigstore's Rekor demonstrates a general transparency log for signed
++software-supply-chain metadata [16]. Nikitin et al. combine independent
++witnesses, verified builds, collective release authorization, and a
++tamper-evident
++release history [17]. Rax need not require one global log. A person, project,
++company, or nation may operate its own. What matters is that equivocation leaves
++evidence
++and that clients are not forced to trust the log operator in silence.
++.PP
++\fBLocal acceptance policy.\fP Rax should carry evidence, not issue absolution.
++The final decision belongs to the user or organization. A policy may require:
++.IP "-" 3
++the downloaded bytes to match the ObjectId;
++.IP "-" 3
++a signed binding from the requested PlanId to that ObjectId;
++.IP "-" 3
++a builder whose isolation claims meet local requirements;
++.IP "-" 3
++fresh source and update authorization;
++.IP "-" 3
++agreement from a threshold of independent rebuilders;
++.IP "-" 3
++materially distinct bootstrap roots among those rebuilders; and
++.IP "-" 3
++inclusion of the release and its evidence in monitored logs.
++.PP
++Failure should explain which fact, claim, or policy rule was missing. The user
++should see \fIcontent verified\fP, \fIplan bound\fP, \fIisolated\fP,
++\fIreproduced\fP, \fIdiverse\fP, or \fItransparent\fP, not a green shield that
++pretends all these words mean the same thing.
++.PP
++\fBResidual trust.\fP Rax cannot make evil source good, careless source wise, or
++a compromised kernel faithful. It cannot prove that reviewers read what they
++signed or that independent builders are not secretly one actor. It can make each
++remaining trust decision smaller, named, and challengeable.
++.PP
++That is the security claim: not trustlessness, but evidence. Not certainty, but
++a chain whose links can be held in the hand. The store tells us what is there.
++The evidence tells us who said it should be there. Local policy decides whether
++to open the door.
+ .SH
+ Related Work
+ .PP
+@@ -868,10 +999,14 @@
+ .IP "Milestone 5" 12
+ Fixed-output HTTPS, Git, and local-tree fetchers.
+ .IP "Milestone 6" 12
+-Signed realization records, object archives, and binary caches.
++Signed realization records, object archives, binary caches, and local evidence
++policy.
+ .IP "Milestone 7" 12
+-Parallel scheduling, remote builders, cancellation, and log streaming.
++Authenticated source and update history, transparency logs, independent and
++diverse rebuilding, and bootstrap-ancestry records.
+ .IP "Milestone 8" 12
++Parallel scheduling, remote builders, cancellation, and log streaming.
++.IP "Milestone 9" 12
+ A separate package collection and higher-level development environments.
+ .PP
+ The language must not absorb a feature merely because a future package
+@@ -896,6 +1031,11 @@
+ supply verified realizations; and capabilities state what effects a builder may
+ attempt.
+ .PP
++Rax cannot certify goodness. It can require each accepted object to answer four
++questions: what Plan requested it, what bytes were produced, who witnessed the
++relation, and why local policy allowed it through. The aim is not to abolish
++trust, but to make every remaining trust decision visible and contestable.
++.PP
+ The proposal is intentionally smaller than an operating-system distribution.
+ Its first obligation is to prove that the language, identity, and store
+ protocols are understandable and correct. If that foundation holds, package
+@@ -967,6 +1107,38 @@
+ .IP "[12]" 5
+ Reproducible Builds, "Definitions," project documentation.
+ https:\://reproducible-builds.org/\:docs/\:definition/
++.IP "[13]" 5
++Supply-chain Levels for Software Artifacts, "SLSA Specification," version 1.2,
++Linux Foundation, 2026.
++https:\://slsa.dev/\:spec/\:v1.2/
++.IP "[14]" 5
++S. Torres-Arias, H. Afzali, T. K. Kuppusamy, R. Curtmola, and J. Cappos,
++"in-toto: Providing Farm-to-Table Guarantees for Bits and Bytes," Proceedings
++of the 28th USENIX Security Symposium, 2019, pp. 1393-1410.
++https:\://www.usenix.org/\:conference/\:usenixsecurity19/\:\c
++presentation/\:torres-arias
++.IP "[15]" 5
++The Update Framework, "The Update Framework Specification," version 1.0.35,
++project documentation.
++https:\://theupdateframework.github.io/\:specification/\:v1.0.35/
++.IP "[16]" 5
++Sigstore, "Rekor," project documentation.
++https:\://docs.sigstore.dev/\:logging/\:overview/
++.IP "[17]" 5
++K. Nikitin, E. Kokoris-Kogias, P. Jovanovic, N. Gailly, L. Gasser,
++I. Khoffi, J. Cappos, and B. Ford, "CHAINIAC: Proactive Software-Update
++Transparency via Collectively Signed Skipchains and Verified Builds,"
++Proceedings of the 26th USENIX Security Symposium, 2017, pp. 1271-1287.
++.IP "[18]" 5
++D. A. Wheeler, "Countering Trusting Trust through Diverse Double-Compiling,"
++Proceedings of the 21st Annual Computer Security Applications Conference,
++Institute of Electrical and Electronics Engineers Computer Society, 2005,
++pp. 28-40. DOI: 10.1109/CSAC.2005.17.
++.IP "[19]" 5
++J. Malka, A. Sharma, M. Monperrus, S. Zacchiroli, and T. Zimmermann,
++"Trusting-Trust Attack against an Entire Linux Distribution through Binary
++Manipulation," arXiv:2607.24888, 2026. Preprint.
++https:\://arxiv.org/\:abs/\:2607.24888
+ 
+ .sp 2
+ .ad b
